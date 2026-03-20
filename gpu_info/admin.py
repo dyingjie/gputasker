@@ -35,10 +35,11 @@ class GPUInfoInline(admin.TabularInline):
 
 @admin.register(GPUServer)
 class GPUServerAdmin(admin.ModelAdmin):
-    list_display = ('ip', 'hostname', 'port', 'valid', 'can_use')
+    fields = ('alias', 'ip', 'hostname', 'port', 'valid', 'can_use')
+    list_display = ('display_name', 'ip', 'hostname', 'port', 'valid', 'can_use')
     list_editable = ('can_use',)
-    search_fields = ('ip', 'hostname', 'port', 'valid', 'can_use')
-    list_display_links = ('ip',)
+    search_fields = ('alias', 'ip', 'hostname')
+    list_display_links = ('display_name',)
     inlines = (GPUInfoInline,)
     ordering = ('ip',)
     readonly_fields = ('hostname',)
@@ -51,6 +52,11 @@ class GPUServerAdmin(admin.ModelAdmin):
 
     def has_add_permission(self, request):
         return request.user.is_superuser
+
+    def display_name(self, obj):
+        return obj.display_name
+
+    display_name.short_description = '显示名称'
 
 
 @admin.register(GPUInfo)

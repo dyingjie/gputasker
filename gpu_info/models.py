@@ -5,6 +5,7 @@ from django.db import models
 
 class GPUServer(models.Model):
     ip = models.CharField('IP地址', max_length=50)
+    alias = models.CharField('别名', max_length=50, blank=True, null=True)
     hostname = models.CharField('主机名', max_length=50, blank=True, null=True)
     port = models.PositiveIntegerField('端口', default=22)
     valid = models.BooleanField('是否可用', default=True)
@@ -17,8 +18,20 @@ class GPUServer(models.Model):
         verbose_name_plural = 'GPU服务器'
         unique_together = (('ip', 'port'),)
 
-    def __str__(self):
+    @property
+    def display_name(self):
+        alias = (self.alias or '').strip()
+        if alias:
+            return alias
+
+        hostname = (self.hostname or '').strip()
+        if hostname:
+            return hostname
+
         return '{}:{:d}'.format(self.ip, self.port)
+
+    def __str__(self):
+        return self.display_name
 
     def get_available_gpus(self, gpu_num, exclusive, memory, utilization):
         available_gpu_list = []
@@ -59,7 +72,7 @@ class GPUInfo(models.Model):
         verbose_name_plural = 'GPU信息'
 
     def __str__(self):
-        return self.name + '[' + str(self.index) + '-' + self.server.ip + ']'
+        return self.name + '[' + str(self.index) + '-' + self.server.display_name + ']'
     
     @property
     def memory_available(self):
