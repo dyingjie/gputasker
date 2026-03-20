@@ -2,6 +2,7 @@ from django.contrib import admin
 from django.db.models import CharField, F, Value
 from django.db.models.functions import Cast, Coalesce, Concat, NullIf, Trim
 from django.utils.html import format_html
+from django.utils import timezone
 
 from .models import GPUServer, GPUInfo
 
@@ -65,7 +66,7 @@ class GPUServerAdmin(admin.ModelAdmin):
 
 @admin.register(GPUInfo)
 class GPUInfoAdmin(admin.ModelAdmin):
-    list_display = ('server_display_name', 'gpu_index', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_at')
+    list_display = ('server_display_name', 'gpu_index', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_since')
     list_filter = ('server', 'name', 'complete_free')
     search_fields = ('uuid', 'name', 'memory_used', 'server__alias', 'server__hostname', 'server__ip')
     list_display_links = ('server_display_name',)
@@ -75,20 +76,25 @@ class GPUInfoAdmin(admin.ModelAdmin):
         css = {
             'all': ('css/admin/custom.css', )
         }
+        js = ('js/admin/gpu_info_relative_time.js',)
 
     def get_queryset(self, request):
-        qs = super().get_queryset(request)
-        return qs.annotate(
-            server_display_name_order=Coalesce(
-                NullIf(Trim(F('server__alias')), Value('')),
-                NullIf(Trim(F('server__hostname')), Value('')),
-                Concat(
-                    F('server__ip'),
-                    Value(':'),
-                    Cast(F('server__port'), output_field=CharField()),
-                ),
+        qs = self.model._default_manager.get_queryset()
+        return qs.annotate(server_display_name_order=self.get_server_display_name_order_expr())
+
+    def get_ordering(self, request):
+        return ('server_display_name_order', 'index')
+
+    def get_server_display_name_order_expr(self):
+        return Coalesce(
+            NullIf(Trim(F('server__alias')), Value('')),
+            NullIf(Trim(F('server__hostname')), Value('')),
+            Concat(
+                F('server__ip'),
+                Value(':'),
+                Cast(F('server__port'), output_field=CharField()),
             ),
-        ).order_by('server_display_name_order', 'index')
+        )
 
     def usernames(self, obj):
         return format_html('<span class="gpuinfo-cell gpuinfo-usernames">{}</span>', obj.usernames())
@@ -108,9 +114,47 @@ class GPUInfoAdmin(admin.ModelAdmin):
         value = '{:d} / {:d} MB ({:.0f}%)'.format(memory_used, memory_total, memory_used / memory_total * 100)
         return format_html('<span class="gpuinfo-cell gpuinfo-memory">{}</span>', value)
 
+    def update_since(self, obj):
+        epoch_ms = int(obj.update_at.timestamp() * 1000)
+        absolute_time = obj.update_at.strftime('%Y-%m-%d %H:%M:%S')
+        return format_html(
+            '<time class="gpuinfo-relative-time" data-epoch-ms="{}" title="{}">{}</time>',
+            epoch_ms,
+            absolute_time,
+            self._relative_time_text(obj.update_at),
+        )
+
+    def _relative_time_text(self, dt):
+        seconds = max(int((timezone.now() - dt).total_seconds()), 0)
+        if seconds < 10:
+            return '刚刚'
+        if seconds < 60:
+            return f'{seconds}秒前'
+
+        minutes = seconds // 60
+        if minutes < 60:
+            return f'{minutes}分钟前'
+
+        hours = minutes // 60
+        if hours < 24:
+            return f'{hours}小时前'
+
+        days = hours // 24
+        if days < 30:
+            return f'{days}天前'
+
+        months = days // 30
+        if months < 12:
+            return f'{months}个月前'
+
+        years = days // 365
+        return f'{years}年前'
+
     server_display_name.short_description = '服务器'
     server_display_name.admin_order_field = 'server_display_name_order'
     gpu_index.short_description = 'GPU序号'
     gpu_index.admin_order_field = 'index'
     memory_usage.short_description = '显存占用率'
+    update_since.short_description = '多久之前'
+    update_since.admin_order_field = 'update_at'
     usernames.short_description = '使用者'

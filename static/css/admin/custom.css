@@ -82,14 +82,15 @@ body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-complete_free 
     text-align: center;
 }
 
-body.app-gpu_info.model-gpuinfo.change-list #result_list th.column-update_at,
-body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_at {
+body.app-gpu_info.model-gpuinfo.change-list #result_list th.column-update_since,
+body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_since {
     width: 9rem;
     min-width: 9rem;
 }
 
 body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-cell,
-body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_at {
+body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_since,
+body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-relative-time {
     display: inline-block;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -111,6 +112,7 @@ body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-usernames {
     text-overflow: clip;
 }
 
-body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_at {
+body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_since,
+body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-relative-time {
     max-width: 8rem;
 }
