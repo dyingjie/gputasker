@@ -9,8 +9,8 @@ from .models import GPUServer, GPUInfo
 
 class GPUInfoInline(admin.TabularInline):
     model = GPUInfo
-    fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_at')
-    readonly_fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_at')
+    fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'free_since', 'update_at')
+    readonly_fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'free_since', 'update_at')
 
     show_change_link = True
 
@@ -66,11 +66,11 @@ class GPUServerAdmin(admin.ModelAdmin):
 
 @admin.register(GPUInfo)
 class GPUInfoAdmin(admin.ModelAdmin):
-    list_display = ('server_display_name', 'gpu_index', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_since')
+    list_display = ('server_display_name', 'gpu_index', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_since', 'free_since_duration')
     list_filter = ('server', 'name', 'complete_free')
     search_fields = ('uuid', 'name', 'memory_used', 'server__alias', 'server__hostname', 'server__ip')
     list_display_links = ('server_display_name',)
-    readonly_fields = ('uuid', 'name', 'index', 'utilization', 'memory_total', 'memory_used','server', 'processes', 'use_by_self', 'complete_free', 'update_at')
+    readonly_fields = ('uuid', 'name', 'index', 'utilization', 'memory_total', 'memory_used','server', 'processes', 'use_by_self', 'complete_free', 'free_since', 'update_at')
 
     class Media:
         css = {
@@ -118,43 +118,58 @@ class GPUInfoAdmin(admin.ModelAdmin):
         epoch_ms = int(obj.update_at.timestamp() * 1000)
         absolute_time = obj.update_at.strftime('%Y-%m-%d %H:%M:%S')
         return format_html(
-            '<time class="gpuinfo-relative-time" data-epoch-ms="{}" title="{}">{}</time>',
+            '<time class="gpuinfo-relative-time" data-epoch-ms="{}" data-relative-mode="ago" title="{}">{}</time>',
             epoch_ms,
             absolute_time,
-            self._relative_time_text(obj.update_at),
+            self._relative_time_text(obj.update_at, suffix='前'),
         )
 
-    def _relative_time_text(self, dt):
+    def free_since_duration(self, obj):
+        if not obj.complete_free or obj.free_since is None:
+            return '-'
+
+        epoch_ms = int(obj.free_since.timestamp() * 1000)
+        absolute_time = obj.free_since.strftime('%Y-%m-%d %H:%M:%S')
+        return format_html(
+            '<time class="gpuinfo-relative-time gpuinfo-idle-duration" data-epoch-ms="{}" data-relative-mode="duration" title="{}">{}</time>',
+            epoch_ms,
+            absolute_time,
+            self._relative_time_text(obj.free_since, suffix=''),
+        )
+
+    def _relative_time_text(self, dt, suffix='前'):
         seconds = max(int((timezone.now() - dt).total_seconds()), 0)
         if seconds < 10:
             return '刚刚'
         if seconds < 60:
-            return f'{seconds}秒前'
+            return f'{seconds}秒{suffix}'
 
         minutes = seconds // 60
         if minutes < 60:
-            return f'{minutes}分钟前'
+            return f'{minutes}分钟{suffix}'
 
         hours = minutes // 60
         if hours < 24:
-            return f'{hours}小时前'
+            return f'{hours}小时{suffix}'
 
         days = hours // 24
         if days < 30:
-            return f'{days}天前'
+            return f'{days}天{suffix}'
 
         months = days // 30
         if months < 12:
-            return f'{months}个月前'
+            return f'{months}个月{suffix}'
 
         years = days // 365
-        return f'{years}年前'
+        return f'{years}年{suffix}'
 
     server_display_name.short_description = '服务器'
     server_display_name.admin_order_field = 'server_display_name_order'
     gpu_index.short_description = 'GPU序号'
     gpu_index.admin_order_field = 'index'
     memory_usage.short_description = '显存占用率'
-    update_since.short_description = '多久之前'
+    update_since.short_description = '更新时间'
     update_since.admin_order_field = 'update_at'
+    free_since_duration.short_description = '已空闲时间'
+    free_since_duration.admin_order_field = 'free_since'
     usernames.short_description = '使用者'

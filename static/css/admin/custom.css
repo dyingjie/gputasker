@@ -11,6 +11,56 @@
     padding-left: 10px;
 }
 
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td {
+    white-space: nowrap;
+    vertical-align: middle;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td {
+    padding-left: 8px;
+    padding-right: 8px;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-index,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-index {
+    min-width: 4.5rem;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-name,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-name {
+    min-width: 12rem;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-utilization,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-utilization {
+    min-width: 4.5rem;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-memory_usage,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-memory_usage {
+    min-width: 12rem;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-usernames,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-usernames {
+    min-width: 14rem;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-complete_free,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-complete_free {
+    min-width: 5rem;
+    text-align: center;
+}
+
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-free_since,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-free_since,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular th.column-update_at,
+body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-update_at {
+    min-width: 10rem;
+}
+
 body.app-gpu_info.model-gpuinfo.change-list #changelist-form .results {
     overflow-x: auto;
 }
@@ -21,22 +71,37 @@ body.app-gpu_info.model-gpuinfo.change-list #result_list {
     margin-right: auto;
 }
 
+body.app-gpu_info.model-gpuserver.change-list #result_list th,
+body.app-gpu_info.model-gpuserver.change-list #result_list td,
 body.app-gpu_info.model-gpuinfo.change-list #result_list th,
 body.app-gpu_info.model-gpuinfo.change-list #result_list td {
     white-space: nowrap;
     vertical-align: middle;
 }
 
+body.app-gpu_info.model-gpuserver.change-list #result_list td,
 body.app-gpu_info.model-gpuinfo.change-list #result_list td {
     padding-top: 10px;
     padding-bottom: 10px;
 }
 
+body.app-gpu_info.model-gpuserver.change-list #result_list th .text a,
+body.app-gpu_info.model-gpuserver.change-list #result_list th .text span,
+body.app-gpu_info.model-gpuserver.change-list #result_list td,
 body.app-gpu_info.model-gpuinfo.change-list #result_list th .text a,
 body.app-gpu_info.model-gpuinfo.change-list #result_list th .text span,
 body.app-gpu_info.model-gpuinfo.change-list #result_list td {
     padding-left: 8px;
     padding-right: 8px;
+}
+
+body.app-gpu_info.model-gpuserver.change-list #result_list th.column-port,
+body.app-gpu_info.model-gpuserver.change-list #result_list td.field-port,
+body.app-gpu_info.model-gpuserver.change-list #result_list th.column-valid,
+body.app-gpu_info.model-gpuserver.change-list #result_list td.field-valid,
+body.app-gpu_info.model-gpuserver.change-list #result_list th.column-can_use,
+body.app-gpu_info.model-gpuserver.change-list #result_list td.field-can_use {
+    text-align: center;
 }
 
 body.app-gpu_info.model-gpuinfo.change-list #result_list th.action-checkbox-column,
@@ -88,8 +153,13 @@ body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_since {
     min-width: 9rem;
 }
 
+body.app-gpu_info.model-gpuinfo.change-list #result_list th.column-free_since_duration,
+body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-free_since_duration {
+    width: 9rem;
+    min-width: 9rem;
+}
+
 body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-cell,
-body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_since,
 body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-relative-time {
     display: inline-block;
     overflow: hidden;
@@ -112,7 +182,6 @@ body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-usernames {
     text-overflow: clip;
 }
 
-body.app-gpu_info.model-gpuinfo.change-list #result_list td.field-update_since,
 body.app-gpu_info.model-gpuinfo.change-list #result_list .gpuinfo-relative-time {
     max-width: 8rem;
 }

@@ -3,6 +3,8 @@ import subprocess
 import json
 import logging
 
+from django.utils import timezone
+
 from .models import GPUServer, GPUInfo
 
 task_logger = logging.getLogger('django.task')
@@ -290,6 +292,7 @@ class GPUInfoUpdater:
                     server.valid = True
                     server.save()
                 for gpu in gpu_info_json:
+                    is_complete_free = len(gpu['processes']) == 0
                     if GPUInfo.objects.filter(uuid=gpu['uuid']).count() == 0:
                         gpu_info = GPUInfo(
                             uuid=gpu['uuid'],
@@ -299,7 +302,8 @@ class GPUInfoUpdater:
                             memory_total=gpu['memory.total'],
                             memory_used=gpu['memory.used'],
                             processes='\n'.join(map(lambda x: json.dumps(x), gpu['processes'])),
-                            complete_free=len(gpu['processes']) == 0,
+                            complete_free=is_complete_free,
+                            free_since=timezone.now() if is_complete_free else None,
                             server=server
                         )
                         gpu_info.save()
@@ -308,7 +312,12 @@ class GPUInfoUpdater:
                         gpu_info.utilization = self.update_utilization(gpu['uuid'], gpu['utilization.gpu'])
                         gpu_info.memory_total = gpu['memory.total']
                         gpu_info.memory_used = gpu['memory.used']
-                        gpu_info.complete_free = len(gpu['processes']) == 0
+                        if is_complete_free:
+                            if gpu_info.free_since is None:
+                                gpu_info.free_since = timezone.now()
+                        else:
+                            gpu_info.free_since = None
+                        gpu_info.complete_free = is_complete_free
                         gpu_info.processes = '\n'.join(map(lambda x: json.dumps(x), gpu['processes']))
                         gpu_info.save()
             except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as exc:

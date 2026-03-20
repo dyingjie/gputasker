@@ -64,6 +64,7 @@ class GPUInfo(models.Model):
     server = models.ForeignKey(GPUServer, verbose_name='服务器', on_delete=models.CASCADE, related_name='gpus')
     use_by_self = models.BooleanField('是否被gputasker进程占用', default=False)
     complete_free = models.BooleanField('完全空闲', default=False)
+    free_since = models.DateTimeField('空闲开始时间', blank=True, null=True)
     update_at = models.DateTimeField('更新时间', auto_now=True)
 
     class Meta:
