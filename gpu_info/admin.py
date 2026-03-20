@@ -1,4 +1,8 @@
 from django.contrib import admin
+from django.db.models import CharField, F, Value
+from django.db.models.functions import Cast, Coalesce, Concat, NullIf, Trim
+from django.utils.html import format_html
+
 from .models import GPUServer, GPUInfo
 
 
@@ -61,23 +65,52 @@ class GPUServerAdmin(admin.ModelAdmin):
 
 @admin.register(GPUInfo)
 class GPUInfoAdmin(admin.ModelAdmin):
-    list_display = ('index', 'name', 'server', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_at')
+    list_display = ('server_display_name', 'gpu_index', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_at')
     list_filter = ('server', 'name', 'complete_free')
-    search_fields = ('uuid', 'name', 'memory_used', 'server',)
-    list_display_links = ('name',)
-    ordering = ('server', 'index')
+    search_fields = ('uuid', 'name', 'memory_used', 'server__alias', 'server__hostname', 'server__ip')
+    list_display_links = ('server_display_name',)
     readonly_fields = ('uuid', 'name', 'index', 'utilization', 'memory_total', 'memory_used','server', 'processes', 'use_by_self', 'complete_free', 'update_at')
 
+    class Media:
+        css = {
+            'all': ('css/admin/custom.css', )
+        }
+
+    def get_queryset(self, request):
+        qs = super().get_queryset(request)
+        return qs.annotate(
+            server_display_name_order=Coalesce(
+                NullIf(Trim(F('server__alias')), Value('')),
+                NullIf(Trim(F('server__hostname')), Value('')),
+                Concat(
+                    F('server__ip'),
+                    Value(':'),
+                    Cast(F('server__port'), output_field=CharField()),
+                ),
+            ),
+        ).order_by('server_display_name_order', 'index')
+
     def usernames(self, obj):
-        return obj.usernames()
+        return format_html('<span class="gpuinfo-cell gpuinfo-usernames">{}</span>', obj.usernames())
 
     def has_add_permission(self, request):
         return False
 
+    def server_display_name(self, obj):
+        return format_html('<span class="gpuinfo-cell gpuinfo-server">{}</span>', obj.server.display_name)
+
+    def gpu_index(self, obj):
+        return obj.index
+
     def memory_usage(self, obj):
         memory_total = obj.memory_total
         memory_used = obj.memory_used
-        return '{:d} / {:d} MB ({:.0f}%)'.format(memory_used, memory_total, memory_used / memory_total * 100)
-    
+        value = '{:d} / {:d} MB ({:.0f}%)'.format(memory_used, memory_total, memory_used / memory_total * 100)
+        return format_html('<span class="gpuinfo-cell gpuinfo-memory">{}</span>', value)
+
+    server_display_name.short_description = '服务器'
+    server_display_name.admin_order_field = 'server_display_name_order'
+    gpu_index.short_description = 'GPU序号'
+    gpu_index.admin_order_field = 'index'
     memory_usage.short_description = '显存占用率'
     usernames.short_description = '使用者'

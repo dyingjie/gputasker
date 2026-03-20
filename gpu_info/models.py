@@ -95,12 +95,7 @@ class GPUInfo(models.Model):
         """
         if self.processes != '':
             arr = self.processes.split('\n')
-            # only show first two usernames
-            username_arr = [json.loads(item)['username'] for item in arr[:2]]
-            res = ', '.join(username_arr)
-            # others use ... to note
-            if len(arr) > 2:
-                res = res + ', ...'
-            return res
+            username_arr = [json.loads(item)['username'] for item in arr]
+            return ', '.join(username_arr)
         else:
             return '-'
