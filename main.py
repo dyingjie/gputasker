@@ -14,6 +14,7 @@ from task.utils import run_task
 from gpu_info.utils import GPUInfoUpdater
 
 task_logger = logging.getLogger('django.task')
+POLL_INTERVAL_SECONDS = 30
 
 
 if __name__ == '__main__':
@@ -38,7 +39,7 @@ if __name__ == '__main__':
             task_logger.error(str(e))
         finally:
             end_time = time.time()
-            # 确保至少间隔十秒，减少服务器负担
+            # 确保至少间隔三十秒，减少服务器负担
             duration = end_time - start_time
-            if duration < 10:
-                time.sleep(10 - duration)
+            if duration < POLL_INTERVAL_SECONDS:
+                time.sleep(POLL_INTERVAL_SECONDS - duration)
