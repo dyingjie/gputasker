@@ -1,9 +1,26 @@
-import os, stat
+import os
+import stat
+import subprocess
 
 from django.contrib import admin
 
 from .models import UserConfig
 from gpu_tasker.settings import PRIVATE_KEY_DIR
+
+
+def set_private_key_permissions(path):
+    if os.name == 'nt':
+        username = os.environ.get('USERNAME')
+        if not username:
+            raise RuntimeError('Cannot determine Windows username for private key ACL.')
+        subprocess.run(
+            ['icacls', path, '/inheritance:r', '/grant:r', f'{username}:F'],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    else:
+        os.chmod(path, stat.S_IWUSR | stat.S_IREAD)
 
 
 @admin.register(UserConfig)
@@ -33,5 +50,5 @@ class UserConfigAdmin(admin.ModelAdmin):
             obj.server_private_key = obj.server_private_key + '\n'
         with open(obj.server_private_key_path, 'w') as f:
             f.write(obj.server_private_key)
-        os.chmod(obj.server_private_key_path, stat.S_IWUSR | stat.S_IREAD)
+        set_private_key_permissions(obj.server_private_key_path)
         super().save_model(request, obj, form, change)
