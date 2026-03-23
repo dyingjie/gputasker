@@ -1,6 +1,11 @@
+import re
+
 from django.contrib import admin
+from django.contrib import messages
 from django.utils.html import format_html
 from .models import GPUTask, GPUTaskRunningLog
+
+FIXED_GPU_DEVICE_PATTERN = re.compile(r'CUDA_VISIBLE_DEVICES|(?:^|[\s=])cuda:\d+\b|--device(?:\s+|=)cuda:\d+\b', re.IGNORECASE)
 
 
 class GPUTaskRunningLogInline(admin.TabularInline):
@@ -71,9 +76,14 @@ class GPUTaskAdmin(admin.ModelAdmin):
             obj.user = request.user
         # format cmd
         obj.cmd = obj.cmd.replace('\r\n', '\n')
-        if obj.cmd[-1] != '\n':
+        if obj.cmd and obj.cmd[-1] != '\n':
             obj.cmd = obj.cmd + '\n'
         super().save_model(request, obj, form, change)
+        if FIXED_GPU_DEVICE_PATTERN.search(obj.cmd or ''):
+            messages.warning(
+                request,
+                '调度器会自动设置 CUDA_VISIBLE_DEVICES。任务命令里不要手动设置该变量，也不要写死 cuda:1 这类物理 GPU 编号；如框架需要设备参数，优先使用 cuda 或当前可见设备内的相对索引。'
+            )
 
     def color_status(self, obj):
         if obj.status == -2:

@@ -1,10 +1,9 @@
 import os
-import signal
 import subprocess
-import json
 import time
 import traceback
 import logging
+import textwrap
 
 from gpu_tasker.settings import RUNNING_LOG_DIR
 from .models import GPUTask, GPUTaskRunningLog
@@ -16,32 +15,75 @@ from notification.email_notification import \
 task_logger = logging.getLogger('django.task')
 
 
-def generate_ssh_cmd(host, user, exec_cmd, port=22, private_key_path=None):
-    exec_cmd = exec_cmd.replace('$', '\\$')
-    if private_key_path is None:
-        cmd = "ssh -o StrictHostKeyChecking=no -p {:d} {}@{} \"{}\"".format(port, user, host, exec_cmd)
-    else:
-        cmd = "ssh -o StrictHostKeyChecking=no -p {:d} -i {} {}@{} \"{}\"".format(port, private_key_path, user, host, exec_cmd)
-    return cmd
+def _hidden_window_kwargs():
+    if os.name != 'nt':
+        return {}
+    kwargs = {}
+    creationflags = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+    if creationflags:
+        kwargs['creationflags'] = creationflags
+    startupinfo_cls = getattr(subprocess, 'STARTUPINFO', None)
+    startf_use_showwindow = getattr(subprocess, 'STARTF_USESHOWWINDOW', 0)
+    sw_hide = getattr(subprocess, 'SW_HIDE', 0)
+    if startupinfo_cls is not None:
+        startupinfo = startupinfo_cls()
+        startupinfo.dwFlags |= startf_use_showwindow
+        startupinfo.wShowWindow = sw_hide
+        kwargs['startupinfo'] = startupinfo
+    return kwargs
 
 
 class RemoteProcess:
-    def __init__(self, user, host, cmd, workspace="~", port=22, private_key_path=None, output_file=None):
-        self.cmd = generate_ssh_cmd(host, user, "cd {} && {}".format(workspace, cmd), port, private_key_path)
-        task_logger.info('cmd:\n' + self.cmd)
+    def __init__(self, user, host, cmd, workspace="~", port=22, private_key_path=None, output_file=None, args=None):
+        self.user = user
+        self.host = host
+        self.workspace = workspace
+        self.remote_cmd = cmd
+        self.args = args or []
+        self.argv = ['ssh', '-o', 'StrictHostKeyChecking=no', '-p', str(port)]
+        if private_key_path is not None:
+            self.argv.extend(['-i', private_key_path])
+        self.argv.extend([f'{user}@{host}', 'bash', '-s', '--', *self.args])
+        self.stdin_data = self.build_remote_script().encode('utf-8')
+        task_logger.info('ssh argv:\n%s', self._loggable_argv())
+        task_logger.info('remote bash script:\n%s', self.build_remote_script())
         if output_file is not None:
             self.output_file = output_file
             with open(self.output_file, "wb") as out:
-                self.proc = subprocess.Popen(self.cmd, shell=True, stdout=out, stderr=out, bufsize=1)
+                self.proc = subprocess.Popen(
+                    self.argv,
+                    shell=False,
+                    stdin=subprocess.PIPE,
+                    stdout=out,
+                    stderr=out,
+                    **_hidden_window_kwargs()
+                )
         else:
-            self.proc = subprocess.Popen(self.cmd, shell=True)
+            self.proc = subprocess.Popen(
+                self.argv,
+                shell=False,
+                stdin=subprocess.PIPE,
+                **_hidden_window_kwargs()
+            )
+        self.proc.stdin.write(self.stdin_data)
+        self.proc.stdin.close()
+
+    def build_remote_script(self):
+        return self.remote_cmd
+
+    def _loggable_argv(self):
+        argv = list(self.argv)
+        if '-i' in argv:
+            key_index = argv.index('-i') + 1
+            if key_index < len(argv):
+                argv[key_index] = '<private-key>'
+        return subprocess.list2cmdline(argv)
 
     def pid(self):
         return self.proc.pid
 
     def kill(self):
-        # os.killpg(os.getpgid(self.proc.pid), signal.SIGKILL)
-        os.kill(self.proc.pid, signal.SIGKILL)
+        self.proc.kill()
 
     def get_return_code(self):
         self.proc.wait()
@@ -50,9 +92,30 @@ class RemoteProcess:
 
 class RemoteGPUProcess(RemoteProcess):
     def __init__(self, user, host, gpus, cmd, workspace="~", port=22, private_key_path=None, output_file=None):
-        env = 'export CUDA_VISIBLE_DEVICES={}'.format(','.join(map(str, gpus)))
-        cmd = 'bash -c \'{}\n{}\n\''.format(env, cmd)
-        super(RemoteGPUProcess, self).__init__(user, host, cmd, workspace, port, private_key_path, output_file)
+        self.gpus = list(gpus)
+        super(RemoteGPUProcess, self).__init__(
+            user,
+            host,
+            cmd,
+            workspace,
+            port,
+            private_key_path,
+            output_file,
+            [workspace, ','.join(map(str, self.gpus))]
+        )
+
+    def build_remote_script(self):
+        cmd = self.remote_cmd.replace('\r\n', '\n')
+        if cmd and cmd[-1] != '\n':
+            cmd = cmd + '\n'
+        return textwrap.dedent("""\
+            set -e
+            workspace="$1"
+            visible_devices="$2"
+
+            cd "$workspace"
+            export CUDA_VISIBLE_DEVICES="$visible_devices"
+        """) + cmd
 
 
 def run_task(task, available_server):

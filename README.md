@@ -305,8 +305,8 @@ $env:USERPROFILE\miniconda3\envs\gputasker\python.exe main.py
 关键字段说明：
 
 - `工作目录`：命令执行时所在目录，必须是 Node 上的 Linux 路径。
-- `命令`：在 Node 上执行的 shell 命令，支持多行。
-- `GPU数量需求`：任务需要的 GPU 数量。调度器会自动设置 `CUDA_VISIBLE_DEVICES`，任务命令里不要手动设置。
+- `命令`：在 Node 上作为 bash 脚本正文执行，支持多行。
+- `GPU数量需求`：任务需要的 GPU 数量。调度器会自动设置 `CUDA_VISIBLE_DEVICES`，任务命令里不要手动设置，也不要写死 `cuda:1` 这类物理卡号。
 - `独占显卡`：为 `True` 时，只调度当前没有其他进程占用的 GPU。
 - `显存需求`：单张 GPU 需要预留的显存。
 - `利用率需求`：单张 GPU 需要满足的空闲利用率。
@@ -317,7 +317,7 @@ $env:USERPROFILE\miniconda3\envs\gputasker\python.exe main.py
 
 ### 4. conda 任务写法
 
-由于任务是通过 SSH 非交互执行的，直接写：
+由于任务是通过 SSH 以远端 bash 脚本的方式执行，直接写：
 
 ```bash
 conda activate train
@@ -338,6 +338,20 @@ python train.py
 ```
 
 如果所有 Node 上 conda 安装路径一致，直接写解释器绝对路径通常最省事。
+
+如果训练框架需要设备参数，优先写：
+
+```bash
+--device cuda
+```
+
+不要写死：
+
+```bash
+--device cuda:1
+```
+
+因为调度器已经通过 `CUDA_VISIBLE_DEVICES` 把可见卡范围限制好了，任务里再写物理 GPU 编号，容易和实际分配结果冲突。
 
 ## 常见问题
 
