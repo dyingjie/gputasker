@@ -293,6 +293,7 @@ class GPUInfoUpdater:
                     server.save()
                 for gpu in gpu_info_json:
                     is_complete_free = len(gpu['processes']) == 0
+                    observed_at = timezone.now()
                     if GPUInfo.objects.filter(uuid=gpu['uuid']).count() == 0:
                         gpu_info = GPUInfo(
                             uuid=gpu['uuid'],
@@ -303,7 +304,8 @@ class GPUInfoUpdater:
                             memory_used=gpu['memory.used'],
                             processes='\n'.join(map(lambda x: json.dumps(x), gpu['processes'])),
                             complete_free=is_complete_free,
-                            free_since=timezone.now() if is_complete_free else None,
+                            busy_since=None if is_complete_free else observed_at,
+                            free_since=observed_at if is_complete_free else None,
                             server=server
                         )
                         gpu_info.save()
@@ -313,9 +315,12 @@ class GPUInfoUpdater:
                         gpu_info.memory_total = gpu['memory.total']
                         gpu_info.memory_used = gpu['memory.used']
                         if is_complete_free:
+                            gpu_info.busy_since = None
                             if gpu_info.free_since is None:
-                                gpu_info.free_since = timezone.now()
+                                gpu_info.free_since = observed_at
                         else:
+                            if gpu_info.busy_since is None:
+                                gpu_info.busy_since = observed_at
                             gpu_info.free_since = None
                         gpu_info.complete_free = is_complete_free
                         gpu_info.processes = '\n'.join(map(lambda x: json.dumps(x), gpu['processes']))

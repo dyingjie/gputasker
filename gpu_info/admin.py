@@ -7,10 +7,22 @@ from django.utils import timezone
 from .models import GPUServer, GPUInfo
 
 
+def get_server_display_name_order_expr(prefix=''):
+    return Coalesce(
+        NullIf(Trim(F(f'{prefix}alias')), Value('')),
+        NullIf(Trim(F(f'{prefix}hostname')), Value('')),
+        Concat(
+            F(f'{prefix}ip'),
+            Value(':'),
+            Cast(F(f'{prefix}port'), output_field=CharField()),
+        ),
+    )
+
+
 class GPUInfoInline(admin.TabularInline):
     model = GPUInfo
-    fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'free_since', 'update_at')
-    readonly_fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'free_since', 'update_at')
+    fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'busy_since', 'free_since', 'update_at')
+    readonly_fields = ('index', 'name', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'busy_since', 'free_since', 'update_at')
 
     show_change_link = True
 
@@ -46,7 +58,6 @@ class GPUServerAdmin(admin.ModelAdmin):
     search_fields = ('alias', 'ip', 'hostname')
     list_display_links = ('display_name',)
     inlines = (GPUInfoInline,)
-    ordering = ('ip',)
     readonly_fields = ('hostname',)
 
     class Media:
@@ -58,19 +69,27 @@ class GPUServerAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         return request.user.is_superuser
 
+    def get_queryset(self, request):
+        qs = self.model._default_manager.get_queryset()
+        return qs.annotate(display_name_order=get_server_display_name_order_expr())
+
+    def get_ordering(self, request):
+        return ('display_name_order', 'ip', 'port')
+
     def display_name(self, obj):
         return obj.display_name
 
     display_name.short_description = '显示名称'
+    display_name.admin_order_field = 'display_name_order'
 
 
 @admin.register(GPUInfo)
 class GPUInfoAdmin(admin.ModelAdmin):
-    list_display = ('server_display_name', 'gpu_index', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_since', 'free_since_duration')
+    list_display = ('server_display_name', 'gpu_index', 'utilization', 'memory_usage', 'usernames', 'complete_free', 'update_since', 'busy_since_duration', 'free_since_duration')
     list_filter = ('server', 'name', 'complete_free')
     search_fields = ('uuid', 'name', 'memory_used', 'server__alias', 'server__hostname', 'server__ip')
     list_display_links = ('server_display_name',)
-    readonly_fields = ('uuid', 'name', 'index', 'utilization', 'memory_total', 'memory_used','server', 'processes', 'use_by_self', 'complete_free', 'free_since', 'update_at')
+    readonly_fields = ('uuid', 'name', 'index', 'utilization', 'memory_total', 'memory_used','server', 'processes', 'use_by_self', 'complete_free', 'busy_since', 'free_since', 'update_at')
 
     class Media:
         css = {
@@ -80,21 +99,10 @@ class GPUInfoAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = self.model._default_manager.get_queryset()
-        return qs.annotate(server_display_name_order=self.get_server_display_name_order_expr())
+        return qs.annotate(server_display_name_order=get_server_display_name_order_expr(prefix='server__'))
 
     def get_ordering(self, request):
-        return ('server_display_name_order', 'index')
-
-    def get_server_display_name_order_expr(self):
-        return Coalesce(
-            NullIf(Trim(F('server__alias')), Value('')),
-            NullIf(Trim(F('server__hostname')), Value('')),
-            Concat(
-                F('server__ip'),
-                Value(':'),
-                Cast(F('server__port'), output_field=CharField()),
-            ),
-        )
+        return ('server_display_name_order', 'server__ip', 'server__port', 'index')
 
     def usernames(self, obj):
         return format_html('<span class="gpuinfo-cell gpuinfo-usernames">{}</span>', obj.usernames())
@@ -137,6 +145,19 @@ class GPUInfoAdmin(admin.ModelAdmin):
             self._relative_time_text(obj.free_since, suffix=''),
         )
 
+    def busy_since_duration(self, obj):
+        if obj.complete_free or obj.busy_since is None:
+            return '-'
+
+        epoch_ms = int(obj.busy_since.timestamp() * 1000)
+        absolute_time = obj.busy_since.strftime('%Y-%m-%d %H:%M:%S')
+        return format_html(
+            '<time class="gpuinfo-relative-time gpuinfo-busy-duration" data-epoch-ms="{}" data-relative-mode="duration" title="{}">{}</time>',
+            epoch_ms,
+            absolute_time,
+            self._relative_time_text(obj.busy_since, suffix=''),
+        )
+
     def _relative_time_text(self, dt, suffix='前'):
         seconds = max(int((timezone.now() - dt).total_seconds()), 0)
         if seconds < 10:
@@ -170,6 +191,8 @@ class GPUInfoAdmin(admin.ModelAdmin):
     memory_usage.short_description = '显存占用率'
     update_since.short_description = '更新时间'
     update_since.admin_order_field = 'update_at'
+    busy_since_duration.short_description = '已占用时间'
+    busy_since_duration.admin_order_field = 'busy_since'
     free_since_duration.short_description = '已空闲时间'
     free_since_duration.admin_order_field = 'free_since'
     usernames.short_description = '使用者'

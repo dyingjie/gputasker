@@ -61,10 +61,12 @@ body.app-gpu_info.model-gpuserver.change-form .inline-group .tabular td.field-up
     min-width: 10rem;
 }
 
+body.app-gpu_info.model-gpuserver.change-list #changelist-form .results,
 body.app-gpu_info.model-gpuinfo.change-list #changelist-form .results {
     overflow-x: auto;
 }
 
+body.app-gpu_info.model-gpuserver.change-list #result_list,
 body.app-gpu_info.model-gpuinfo.change-list #result_list {
     table-layout: auto !important;
     width: auto !important;
@@ -93,6 +95,24 @@ body.app-gpu_info.model-gpuinfo.change-list #result_list th .text span,
 body.app-gpu_info.model-gpuinfo.change-list #result_list td {
     padding-left: 8px;
     padding-right: 8px;
+}
+
+body.app-gpu_info.model-gpuserver.change-list #result_list th.column-display_name,
+body.app-gpu_info.model-gpuserver.change-list #result_list td.field-display_name {
+    width: 8rem;
+    min-width: 8rem;
+}
+
+body.app-gpu_info.model-gpuserver.change-list #result_list th.column-ip,
+body.app-gpu_info.model-gpuserver.change-list #result_list td.field-ip {
+    width: 8.5rem;
+    min-width: 8.5rem;
+}
+
+body.app-gpu_info.model-gpuserver.change-list #result_list th.column-hostname,
+body.app-gpu_info.model-gpuserver.change-list #result_list td.field-hostname {
+    width: 9rem;
+    min-width: 9rem;
 }
 
 body.app-gpu_info.model-gpuserver.change-list #result_list th.column-port,
