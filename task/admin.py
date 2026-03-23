@@ -48,8 +48,8 @@ class GPUTaskRunningLogInline(admin.TabularInline):
 
 @admin.register(GPUTask)
 class GPUTaskAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'workspace', 'cmd', 'gpu_requirement', 'exclusive_gpu', 'memory_requirement', 'utilization_requirement', 'assign_server', 'priority', 'color_status', 'create_at', 'update_at',)
-    list_filter = ('gpu_requirement', 'status', 'assign_server', 'priority')
+    list_display = ('id', 'name', 'workspace', 'cmd', 'gpu_requirement', 'idle_delay_minutes', 'exclusive_gpu', 'memory_requirement', 'utilization_requirement', 'assign_server', 'priority', 'color_status', 'create_at', 'update_at',)
+    list_filter = ('gpu_requirement', 'idle_delay_minutes', 'status', 'assign_server', 'priority')
     search_fields = ('name', 'status',)
     list_display_links = ('name',)
     readonly_fields = ('create_at', 'update_at', 'user',)
@@ -124,6 +124,7 @@ class GPUTaskAdmin(admin.ModelAdmin):
                 cmd=task.cmd,
                 exclusive_gpu=task.exclusive_gpu,
                 gpu_requirement=task.gpu_requirement,
+                idle_delay_minutes=task.idle_delay_minutes,
                 memory_requirement=task.memory_requirement,
                 utilization_requirement=task.utilization_requirement,
                 assign_server=task.assign_server,

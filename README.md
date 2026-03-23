@@ -307,6 +307,7 @@ $env:USERPROFILE\miniconda3\envs\gputasker\python.exe main.py
 - `工作目录`：命令执行时所在目录，必须是 Node 上的 Linux 路径。
 - `命令`：在 Node 上作为 bash 脚本正文执行，支持多行。
 - `GPU数量需求`：任务需要的 GPU 数量。调度器会自动设置 `CUDA_VISIBLE_DEVICES`，任务命令里不要手动设置，也不要写死 `cuda:1` 这类物理卡号。
+- `空闲等待时间`：要求目标 GPU 连续完全空闲满设定分钟数后再启动任务。`0` 表示不等待，实际触发精度受当前 30 秒轮询周期影响。
 - `独占显卡`：为 `True` 时，只调度当前没有其他进程占用的 GPU。
 - `显存需求`：单张 GPU 需要预留的显存。
 - `利用率需求`：单张 GPU 需要满足的空闲利用率。
@@ -374,6 +375,7 @@ ssh -i C:\software\gputasker\master_ed25519 gpuuser@<node_ip> "hostname && nvidi
 - 节点是否 `是否可用 = True`
 - 节点是否 `是否可调度 = True`
 - GPU 数量、显存、利用率条件是否设置过严
+- 是否设置了 `空闲等待时间`，以及目标 GPU 是否已经连续完全空闲满对应分钟数
 
 ### 工作目录填了 Windows 路径
 

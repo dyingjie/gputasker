@@ -1,6 +1,8 @@
 import json
+from datetime import timedelta
 
 from django.db import models
+from django.utils import timezone
 
 
 class GPUServer(models.Model):
@@ -33,11 +35,11 @@ class GPUServer(models.Model):
     def __str__(self):
         return self.display_name
 
-    def get_available_gpus(self, gpu_num, exclusive, memory, utilization):
+    def get_available_gpus(self, gpu_num, exclusive, memory, utilization, idle_delay_minutes=0):
         available_gpu_list = []
         if self.valid and self.can_use:
             for gpu in self.gpus.all():
-                if gpu.check_available(exclusive, memory, utilization):
+                if gpu.check_available(exclusive, memory, utilization, idle_delay_minutes):
                     available_gpu_list.append(gpu.index)
             if len(available_gpu_list) >= gpu_num:
                 return available_gpu_list
@@ -83,11 +85,22 @@ class GPUInfo(models.Model):
     def utilization_available(self):
         return 100 - self.utilization
 
-    def check_available(self, exclusive, memory, utilization):
+    def check_available(self, exclusive, memory, utilization, idle_delay_minutes=0):
         if exclusive:
-            return not self.use_by_self and self.complete_free
+            available = not self.use_by_self and self.complete_free
         else:
-            return not self.use_by_self and self.memory_available > memory and self.utilization_available > utilization
+            available = not self.use_by_self and self.memory_available > memory and self.utilization_available > utilization
+
+        if not available:
+            return False
+
+        if idle_delay_minutes <= 0:
+            return True
+
+        if not self.complete_free or self.free_since is None:
+            return False
+
+        return timezone.now() - self.free_since >= timedelta(minutes=idle_delay_minutes)
 
     def usernames(self):
         r"""

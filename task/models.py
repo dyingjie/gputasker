@@ -16,6 +16,14 @@ class GPUTask(models.Model):
         (1, '运行中'),
         (2, '已完成'),
     )
+    IDLE_DELAY_CHOICE = (
+        (0, '不延迟'),
+        (1, '空闲超过1分钟'),
+        (3, '空闲超过3分钟'),
+        (5, '空闲超过5分钟'),
+        (10, '空闲超过10分钟'),
+        (30, '空闲超过30分钟'),
+    )
     name = models.CharField('任务名称', max_length=100)
     user = models.ForeignKey(User, verbose_name='用户', on_delete=models.CASCADE, related_name='tasks')
     workspace = models.CharField('工作目录', max_length=200)
@@ -25,6 +33,7 @@ class GPUTask(models.Model):
         default=1,
         validators=[MaxValueValidator(8), MinValueValidator(0)]
     )
+    idle_delay_minutes = models.PositiveSmallIntegerField('空闲等待时间', choices=IDLE_DELAY_CHOICE, default=0)
     exclusive_gpu = models.BooleanField('独占显卡', default=False)
     memory_requirement = models.PositiveSmallIntegerField('显存需求(MB)', default=0)
     utilization_requirement = models.PositiveSmallIntegerField('利用率需求(%)', default=0)
@@ -50,7 +59,8 @@ class GPUTask(models.Model):
                     self.gpu_requirement,
                     self.exclusive_gpu,
                     self.memory_requirement,
-                    self.utilization_requirement
+                    self.utilization_requirement,
+                    self.idle_delay_minutes
                 )
                 if available_gpus is not None:
                     available_server = {
@@ -63,7 +73,8 @@ class GPUTask(models.Model):
                 self.gpu_requirement,
                 self.exclusive_gpu,
                 self.memory_requirement,
-                self.utilization_requirement
+                self.utilization_requirement,
+                self.idle_delay_minutes
             )
             if available_gpus is not None:
                 available_server = {
