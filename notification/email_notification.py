@@ -56,6 +56,18 @@ TASK_FAIL_NOTIFICATION_TEMPLATE = \
 '''
 
 
+def get_server_display_name(server):
+    alias = (server.alias or '').strip()
+    if alias:
+        return alias
+
+    hostname = (server.hostname or '').strip()
+    if hostname:
+        return hostname
+
+    return server.ip
+
+
 def send_email(address, title, content):
     if EMAIL_NOTIFICATION:
         try:
@@ -81,12 +93,13 @@ def check_email_config(func):
 def send_task_start_email(running_log):
     address = running_log.task.user.email
     title = TASK_START_NOTIFICATION_TITLE
+    server_display_name = get_server_display_name(running_log.server)
     content = TASK_START_NOTIFICATION_TEMPLATE.format(
         running_log.task.name,
         running_log.task.name,
         running_log.task.workspace,
         running_log.task.cmd,
-        running_log.server.ip,
+        server_display_name,
         running_log.gpus,
         running_log.start_at.strftime("%Y-%m-%d %H:%M:%S")
     )
@@ -97,12 +110,13 @@ def send_task_start_email(running_log):
 def send_task_finish_email(running_log):
     address = running_log.task.user.email
     title = TASK_FINISH_NOTIFICATION_TITLE
+    server_display_name = get_server_display_name(running_log.server)
     content = TASK_FINISH_NOTIFICATION_TEMPLATE.format(
         running_log.task.name,
         running_log.task.name,
         running_log.task.workspace,
         running_log.task.cmd,
-        running_log.server.ip,
+        server_display_name,
         running_log.gpus,
         running_log.update_at.strftime("%Y-%m-%d %H:%M:%S")
     )
@@ -113,12 +127,13 @@ def send_task_finish_email(running_log):
 def send_task_fail_email(running_log):
     address = running_log.task.user.email
     title = TASK_FAIL_NOTIFICATION_TITLE
+    server_display_name = get_server_display_name(running_log.server)
     content = TASK_FAIL_NOTIFICATION_TEMPLATE.format(
         running_log.task.name,
         running_log.task.name,
         running_log.task.workspace,
         running_log.task.cmd,
-        running_log.server.ip,
+        server_display_name,
         running_log.gpus,
         running_log.update_at.strftime("%Y-%m-%d %H:%M:%S")
     )

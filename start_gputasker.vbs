@@ -1,6 +1,6 @@
 Option Explicit
 
-Dim shell, fso, scriptDir, pythonExe, cmdWeb, cmdScheduler
+Dim shell, fso, scriptDir, pythonExe, cmdMigrate, cmdWeb, cmdScheduler, exitCode
 
 Set shell = CreateObject("WScript.Shell")
 Set fso = CreateObject("Scripting.FileSystemObject")
@@ -15,9 +15,32 @@ End If
 
 shell.CurrentDirectory = scriptDir
 
-cmdWeb = """" & pythonExe & """ manage.py runserver --insecure 0.0.0.0:8888"
-cmdScheduler = """" & pythonExe & """ main.py"
+cmdMigrate = Quote(pythonExe) & " manage.py migrate --noinput"
+exitCode = shell.Run(cmdMigrate, 0, True)
+If exitCode <> 0 Then
+    MsgBox "Database migration failed. Exit code: " & exitCode, vbCritical, "GPU Tasker"
+    WScript.Quit exitCode
+End If
 
-shell.Run cmdWeb, 0, False
-WScript.Sleep 2000
+If Not IsPortListening(8888) Then
+    cmdWeb = Quote(pythonExe) & " manage.py runserver --insecure 0.0.0.0:8888 --noreload"
+    shell.Run cmdWeb, 0, False
+    WScript.Sleep 2000
+End If
+
+cmdScheduler = """" & pythonExe & """ main.py"
 shell.Run cmdScheduler, 0, False
+
+Function Quote(value)
+    Quote = """" & value & """"
+End Function
+
+Function IsPortListening(port)
+    Dim checkCommand, checkExitCode
+
+    checkCommand = "powershell -NoProfile -Command ""$conn = Get-NetTCPConnection -State Listen -LocalPort " _
+        & port _
+        & " -ErrorAction SilentlyContinue; if ($null -ne $conn) { exit 0 } else { exit 1 }"""
+    checkExitCode = shell.Run(checkCommand, 0, True)
+    IsPortListening = (checkExitCode = 0)
+End Function
