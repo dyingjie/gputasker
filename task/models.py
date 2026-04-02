@@ -1,11 +1,15 @@
 import os
 import signal
+import logging
 
 from django.db import models
 from django.core.validators import MaxValueValidator, MinValueValidator
 
 from gpu_info.models import GPUServer, GPUInfo
 from django.contrib.auth.models import User
+
+
+task_logger = logging.getLogger('django.task')
 
 
 class GPUTask(models.Model):
@@ -109,7 +113,25 @@ class GPUTaskRunningLog(models.Model):
     def __str__(self):
         return self.task.name + '-' + str(self.index)
 
-    def kill(self):
+    def kill(self, reason='manual kill', actor=None):
+        reason_text = reason
+        if actor:
+            reason_text = '{} by {}'.format(reason, actor)
+        task_logger.warning(
+            'Terminating running task log %d (task %d-%s), pid=%s, server=%s, gpus=%s, reason=%s',
+            self.id,
+            self.task_id,
+            self.task.name,
+            self.pid,
+            self.server.ip if self.server_id else '-',
+            self.gpus,
+            reason_text
+        )
+        try:
+            with open(self.log_file_path, 'a', encoding='utf-8', errors='ignore') as handle:
+                handle.write('\n[GPUTASKER] local_termination_reason={}\n'.format(reason_text))
+        except Exception:
+            pass
         os.kill(self.pid, signal.SIGKILL)
     
     def delete_log_file(self):

@@ -59,6 +59,7 @@ class GPUServerAdmin(admin.ModelAdmin):
     list_display_links = ('display_name',)
     inlines = (GPUInfoInline,)
     readonly_fields = ('hostname',)
+    ordering = ('ip', 'port')
 
     class Media:
         # custom css
@@ -71,10 +72,7 @@ class GPUServerAdmin(admin.ModelAdmin):
 
     def get_queryset(self, request):
         qs = self.model._default_manager.get_queryset()
-        return qs.annotate(display_name_order=get_server_display_name_order_expr())
-
-    def get_ordering(self, request):
-        return ('display_name_order', 'ip', 'port')
+        return qs.annotate(display_name_order=get_server_display_name_order_expr()).order_by('display_name_order', 'ip', 'port')
 
     def display_name(self, obj):
         return obj.display_name

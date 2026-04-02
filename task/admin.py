@@ -205,7 +205,7 @@ class GPUTaskRunningLogAdmin(admin.ModelAdmin):
     def kill_button(self, request, queryset):
         for running_task in queryset:
             if running_task.status == 1:
-                running_task.kill()
+                running_task.kill(reason='admin kill action', actor=str(request.user))
 
     kill_button.short_description = '结束进程'
     kill_button.icon = 'el-icon-error'

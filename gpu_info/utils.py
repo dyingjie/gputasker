@@ -13,6 +13,7 @@ HOSTNAME_MARKER = '__GPUTASKER_HOSTNAME__'
 GPU_MARKER = '__GPUTASKER_GPU__'
 APPS_MARKER = '__GPUTASKER_APPS__'
 USERS_MARKER = '__GPUTASKER_USERS__'
+SSH_CLEANUP_PREVIEW_LENGTH = 220
 
 
 def _hidden_window_kwargs():
@@ -33,10 +34,39 @@ def _hidden_window_kwargs():
     return kwargs
 
 
+def _shorten_text(text, max_length=SSH_CLEANUP_PREVIEW_LENGTH):
+    text = ' '.join((text or '').split())
+    if len(text) <= max_length:
+        return text
+    return text[: max_length - 3] + '...'
+
+
+def _sanitize_command_line(command_line, private_key_path=None):
+    sanitized = command_line or ''
+    if private_key_path:
+        candidates = {
+            private_key_path,
+            private_key_path.replace('\\', '/'),
+            private_key_path.replace('/', '\\'),
+        }
+        for candidate in candidates:
+            sanitized = sanitized.replace(candidate, '<private-key>')
+    return _shorten_text(sanitized)
+
+
+def _classify_ssh_command(command_line):
+    command_line = (command_line or '').lower()
+    if 'bash -s --' in command_line:
+        return 'task-runner'
+    if '__gputasker_gpu__' in command_line or 'nvidia-smi --query-gpu' in command_line:
+        return 'gpu-poll'
+    return 'generic-ssh'
+
+
 def _kill_process_tree(pid):
     if not pid or os.name != 'nt':
-        return
-    subprocess.run(
+        return False
+    result = subprocess.run(
         ['taskkill', '/T', '/F', '/PID', str(pid)],
         shell=False,
         stdout=subprocess.DEVNULL,
@@ -44,11 +74,12 @@ def _kill_process_tree(pid):
         check=False,
         **_hidden_window_kwargs()
     )
+    return result.returncode == 0
 
 
 def _cleanup_timed_out_ssh_processes(host, user, private_key_path=None):
     if os.name != 'nt':
-        return
+        return []
 
     filters = [f'{user}@{host}']
     if private_key_path:
@@ -56,17 +87,20 @@ def _cleanup_timed_out_ssh_processes(host, user, private_key_path=None):
 
     ps_script = """
 $filters = $args | ForEach-Object { $_.ToLower() }
-Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" |
-    Where-Object {
-        $cmd = $_.CommandLine
-        if (-not $cmd) { return $false }
-        $cmd = $cmd.ToLower()
-        foreach ($filter in $filters) {
-            if (-not $cmd.Contains($filter)) { return $false }
-        }
-        return $true
-    } |
-    Select-Object -ExpandProperty ProcessId
+$matches = @(
+    Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" |
+        Where-Object {
+            $cmd = $_.CommandLine
+            if (-not $cmd) { return $false }
+            $cmd = $cmd.ToLower()
+            foreach ($filter in $filters) {
+                if (-not $cmd.Contains($filter)) { return $false }
+            }
+            return $true
+        } |
+        Select-Object ProcessId, CommandLine
+)
+$matches | ConvertTo-Json -Compress
 """
 
     cleanup = subprocess.run(
@@ -78,10 +112,41 @@ Get-CimInstance Win32_Process -Filter "Name='ssh.exe'" |
         **_hidden_window_kwargs()
     )
 
-    for pid in cleanup.stdout.splitlines():
-        pid = pid.strip()
-        if pid.isdigit():
-            _kill_process_tree(pid)
+    if cleanup.returncode != 0:
+        task_logger.warning(
+            'Failed to enumerate timed-out ssh.exe processes for %s: return_code=%s stderr=%s',
+            host,
+            cleanup.returncode,
+            _shorten_text(cleanup.stderr)
+        )
+        return []
+
+    raw_output = cleanup.stdout.strip()
+    if not raw_output:
+        return []
+
+    try:
+        cleanup_targets = json.loads(raw_output)
+    except json.JSONDecodeError:
+        task_logger.warning('Failed to parse timed-out ssh.exe cleanup output for %s: %s', host, _shorten_text(raw_output))
+        return []
+
+    if isinstance(cleanup_targets, dict):
+        cleanup_targets = [cleanup_targets]
+
+    cleanup_results = []
+    for target in cleanup_targets:
+        pid = target.get('ProcessId')
+        if not str(pid).isdigit():
+            continue
+        command_line = target.get('CommandLine', '')
+        cleanup_results.append({
+            'pid': int(pid),
+            'command_kind': _classify_ssh_command(command_line),
+            'command_line': _sanitize_command_line(command_line, private_key_path),
+            'killed': _kill_process_tree(pid),
+        })
+    return cleanup_results
 
 
 def _format_update_exception(exc):
@@ -225,7 +290,31 @@ def ssh_execute(host, user, exec_cmd, port=22, private_key_path=None):
         )
         return result.stdout
     except subprocess.TimeoutExpired:
-        _cleanup_timed_out_ssh_processes(host, user, private_key_path)
+        cleanup_results = _cleanup_timed_out_ssh_processes(host, user, private_key_path)
+        if cleanup_results:
+            cleanup_summary = '; '.join(
+                'pid={pid} kind={command_kind} killed={killed} cmd={command_line}'.format(**result)
+                for result in cleanup_results
+            )
+            task_logger.warning(
+                'SSH to %s timed out after 60s. Cleanup targeted %d local ssh.exe process(es): %s',
+                host,
+                len(cleanup_results),
+                cleanup_summary
+            )
+            risky_cleanup = [result for result in cleanup_results if result['command_kind'] != 'gpu-poll']
+            if risky_cleanup:
+                risky_summary = '; '.join(
+                    'pid={pid} kind={command_kind} cmd={command_line}'.format(**result)
+                    for result in risky_cleanup
+                )
+                task_logger.error(
+                    'SSH timeout cleanup for %s matched non-poll ssh.exe process(es). This may interrupt running tasks: %s',
+                    host,
+                    risky_summary
+                )
+        else:
+            task_logger.warning('SSH to %s timed out after 60s. No matching local ssh.exe process was found during cleanup.', host)
         raise
 
 
