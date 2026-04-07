@@ -1,5 +1,6 @@
 import os
 import logging
+from collections import deque
 
 from django.db import models
 from django.core.validators import MaxValueValidator, MinValueValidator
@@ -9,6 +10,31 @@ from django.contrib.auth.models import User
 
 
 task_logger = logging.getLogger('django.task')
+FAILURE_DIAGNOSTIC_LOG_PREFIXES = {
+    'failure_summary': '[GPUTASKER] failure_diagnosis=',
+    'failure_hint': '[GPUTASKER] failure_hint=',
+    'remote_exit_code': '[GPUTASKER] remote_exit_code=',
+    'last_output': '[GPUTASKER] last_output=',
+}
+FAILURE_DIAGNOSTIC_KEYS = tuple(FAILURE_DIAGNOSTIC_LOG_PREFIXES.keys())
+
+
+def _read_log_tail(log_file_path, max_lines=200):
+    if not log_file_path or not os.path.isfile(log_file_path):
+        return []
+    with open(log_file_path, 'r', encoding='utf-8', errors='ignore') as handle:
+        return list(deque((line.rstrip('\r\n') for line in handle), maxlen=max_lines))
+
+
+def _parse_failure_diagnostics_from_log(log_file_path):
+    diagnostics = {key: '' for key in FAILURE_DIAGNOSTIC_KEYS}
+    for line in reversed(_read_log_tail(log_file_path)):
+        for key, prefix in FAILURE_DIAGNOSTIC_LOG_PREFIXES.items():
+            if diagnostics[key]:
+                continue
+            if line.startswith(prefix):
+                diagnostics[key] = line[len(prefix):].strip()
+    return diagnostics
 
 
 class GPUTask(models.Model):
@@ -101,6 +127,10 @@ class GPUTaskRunningLog(models.Model):
     gpus = models.CharField('GPU', max_length=20)
     log_file_path = models.FilePathField(path='running_log', match='.*\.log$', verbose_name="日志文件")
     stop_requested = models.BooleanField('已请求停止', default=False)
+    failure_summary = models.CharField('失败摘要', max_length=255, blank=True, default='')
+    failure_hint = models.CharField('失败提示', max_length=255, blank=True, default='')
+    remote_exit_code = models.CharField('远端退出码', max_length=64, blank=True, default='')
+    last_output = models.CharField('最后输出', max_length=255, blank=True, default='')
     status = models.SmallIntegerField('状态', choices=STATUS_CHOICE, default=1)
     start_at = models.DateTimeField('开始时间', auto_now_add=True)
     update_at = models.DateTimeField('更新时间', auto_now=True)
@@ -112,6 +142,33 @@ class GPUTaskRunningLog(models.Model):
 
     def __str__(self):
         return self.task.name + '-' + str(self.index)
+
+    def get_failure_diagnostics(self, force_refresh=False):
+        if not force_refresh and hasattr(self, '_failure_diagnostics_cache'):
+            return dict(self._failure_diagnostics_cache)
+
+        diagnostics = {
+            'failure_summary': (self.failure_summary or '').strip(),
+            'failure_hint': (self.failure_hint or '').strip(),
+            'remote_exit_code': (self.remote_exit_code or '').strip(),
+            'last_output': (self.last_output or '').strip(),
+        }
+        if any(not diagnostics[key] for key in FAILURE_DIAGNOSTIC_KEYS):
+            fallback = _parse_failure_diagnostics_from_log(self.log_file_path)
+            for key in FAILURE_DIAGNOSTIC_KEYS:
+                if not diagnostics[key]:
+                    diagnostics[key] = fallback[key]
+
+        self._failure_diagnostics_cache = dict(diagnostics)
+        return diagnostics
+
+    def update_failure_diagnostics(self, diagnostics):
+        normalized = {key: (diagnostics.get(key, '') or '').strip() for key in FAILURE_DIAGNOSTIC_KEYS}
+        self.failure_summary = normalized['failure_summary']
+        self.failure_hint = normalized['failure_hint']
+        self.remote_exit_code = normalized['remote_exit_code']
+        self.last_output = normalized['last_output']
+        self._failure_diagnostics_cache = dict(normalized)
 
     def kill(self, reason='manual kill', actor=None):
         reason_text = reason

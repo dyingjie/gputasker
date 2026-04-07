@@ -1,12 +1,15 @@
 import os
 from unittest.mock import Mock, patch
 
+from django.contrib.admin.sites import AdminSite
 from django.contrib.auth.models import User
 from django.test import TestCase
 
 from base.models import UserConfig
 from gpu_info.models import GPUServer, GPUInfo
 from gpu_tasker.settings import RUNNING_LOG_DIR
+from notification.email_notification import send_task_fail_email
+from task.admin import GPUTaskAdmin, GPUTaskRunningLogAdmin
 from task.models import GPUTask, GPUTaskRunningLog
 from task.utils import (
     PersistentSSHConnectionError,
@@ -29,7 +32,7 @@ class DummyConnectionManager:
 
 class TaskRuntimeTests(TestCase):
     def setUp(self):
-        self.user = User.objects.create_user(username='tester', password='secret')
+        self.user = User.objects.create_user(username='tester', password='secret', email='tester@example.com')
         UserConfig.objects.create(
             user=self.user,
             server_username='gpuuser',
@@ -57,6 +60,8 @@ class TaskRuntimeTests(TestCase):
             gpu_requirement=1,
             status=0,
         )
+        self.task_admin = GPUTaskAdmin(GPUTask, AdminSite())
+        self.running_log_admin = GPUTaskRunningLogAdmin(GPUTaskRunningLog, AdminSite())
 
     def tearDown(self):
         for running_log in GPUTaskRunningLog.objects.all():
@@ -74,6 +79,11 @@ class TaskRuntimeTests(TestCase):
             status=status,
             stop_requested=stop_requested,
         )
+
+    def _write_log(self, log_file_path, content):
+        os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
+        with open(log_file_path, 'w', encoding='utf-8', errors='ignore') as handle:
+            handle.write(content)
 
     @patch('task.utils.send_task_start_email')
     @patch('task.utils._launch_remote_task', return_value=4321)
@@ -176,6 +186,8 @@ class TaskRuntimeTests(TestCase):
         self.assertFalse(running_log.stop_requested)
         self.assertEqual(self.task.status, -1)
         self.assertFalse(self.gpu.use_by_self)
+        self.assertEqual(running_log.failure_summary, '远端任务被终止')
+        self.assertEqual(running_log.remote_exit_code, '143 (0x0000008F)')
         mock_request_remote_stop.assert_called_once()
         mock_send_fail_email.assert_called_once_with(running_log)
 
@@ -188,3 +200,70 @@ class TaskRuntimeTests(TestCase):
         self.assertTrue(running_log.stop_requested)
         with open(running_log.log_file_path, 'r', encoding='utf-8', errors='ignore') as handle:
             self.assertIn('local_termination_reason=admin kill action by tester', handle.read())
+
+    @patch('task.utils.send_task_fail_email')
+    @patch('task.utils._launch_remote_task', side_effect=RuntimeError('launch exploded'))
+    def test_run_task_persists_failure_diagnostics_when_launch_fails(self, mock_launch_remote_task, mock_send_fail_email):
+        connection_manager = DummyConnectionManager()
+
+        run_task(self.task, {'server': self.server, 'gpus': [0]}, connection_manager)
+
+        running_log = GPUTaskRunningLog.objects.get(task=self.task)
+        self.task.refresh_from_db()
+        self.gpu.refresh_from_db()
+
+        self.assertEqual(running_log.status, -1)
+        self.assertEqual(self.task.status, -1)
+        self.assertFalse(self.gpu.use_by_self)
+        self.assertEqual(running_log.failure_summary, '任务启动失败: RuntimeError: launch exploded')
+        self.assertEqual(running_log.last_output, 'RuntimeError: launch exploded')
+        self.assertEqual(running_log.remote_exit_code, '')
+        with open(running_log.log_file_path, 'r', encoding='utf-8', errors='ignore') as handle:
+            content = handle.read()
+        self.assertIn('[GPUTASKER] failure_diagnosis=任务启动失败: RuntimeError: launch exploded', content)
+        self.assertIn('[GPUTASKER] last_output=RuntimeError: launch exploded', content)
+        mock_launch_remote_task.assert_called_once()
+        mock_send_fail_email.assert_called_once_with(running_log)
+
+    def test_failure_diagnostics_fall_back_to_log_markers_in_admin(self):
+        running_log = self._create_running_log(status=-1, stop_requested=False)
+        self.task.status = -1
+        self.task.save(update_fields=['status', 'update_at'])
+        self._write_log(
+            running_log.log_file_path,
+            '\n'.join([
+                'Traceback (most recent call last):',
+                'RuntimeError: boom',
+                '[GPUTASKER] failure_diagnosis=日志回退失败摘要',
+                '[GPUTASKER] remote_exit_code=2 (0x00000002)',
+                '[GPUTASKER] failure_hint=日志回退失败提示',
+                '[GPUTASKER] last_output=日志回退最后输出',
+            ]) + '\n'
+        )
+
+        diagnostics = running_log.get_failure_diagnostics(force_refresh=True)
+
+        self.assertEqual(diagnostics['failure_summary'], '日志回退失败摘要')
+        self.assertEqual(diagnostics['remote_exit_code'], '2 (0x00000002)')
+        self.assertEqual(self.task_admin.failure_summary_display(self.task), '日志回退失败摘要')
+        self.assertEqual(self.running_log_admin.failure_hint_display(running_log), '日志回退失败提示')
+        self.assertEqual(self.running_log_admin.last_output_display(running_log), '日志回退最后输出')
+
+    @patch('notification.email_notification.send_email')
+    @patch('notification.email_notification.EMAIL_NOTIFICATION', True)
+    def test_send_task_fail_email_includes_failure_diagnostics(self, mock_send_email):
+        running_log = self._create_running_log(status=-1, stop_requested=False)
+        running_log.failure_summary = '任务运行失败: CUDA out of memory'
+        running_log.remote_exit_code = '1 (0x00000001)'
+        running_log.last_output = 'RuntimeError: CUDA out of memory'
+        running_log.save(update_fields=['failure_summary', 'remote_exit_code', 'last_output', 'update_at'])
+
+        send_task_fail_email(running_log)
+
+        self.assertTrue(mock_send_email.called)
+        address, title, content = mock_send_email.call_args[0]
+        self.assertEqual(address, 'tester@example.com')
+        self.assertEqual(title, '任务运行失败')
+        self.assertIn('失败摘要：任务运行失败: CUDA out of memory', content)
+        self.assertIn('远端退出码：1 (0x00000001)', content)
+        self.assertIn('最后输出：RuntimeError: CUDA out of memory', content)

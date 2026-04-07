@@ -10,8 +10,8 @@ FIXED_GPU_DEVICE_PATTERN = re.compile(r'CUDA_VISIBLE_DEVICES|(?:^|[\s=])cuda:\d+
 
 class GPUTaskRunningLogInline(admin.TabularInline):
     model = GPUTaskRunningLog
-    fields = ('index', 'server', 'gpus', 'log_file_path', 'color_status', 'start_at', 'update_at',)
-    readonly_fields = ('index', 'server', 'gpus', 'log_file_path', 'color_status', 'start_at', 'update_at',)
+    fields = ('index', 'server', 'gpus', 'failure_summary_display', 'log_file_path', 'color_status', 'start_at', 'update_at',)
+    readonly_fields = ('index', 'server', 'gpus', 'failure_summary_display', 'log_file_path', 'color_status', 'start_at', 'update_at',)
 
     show_change_link = True
 
@@ -45,10 +45,15 @@ class GPUTaskRunningLogInline(admin.TabularInline):
     color_status.short_description = '状态'
     color_status.admin_order_field = 'status'
 
+    def failure_summary_display(self, obj):
+        return obj.get_failure_diagnostics().get('failure_summary') or '-'
+
+    failure_summary_display.short_description = '失败信息'
+
 
 @admin.register(GPUTask)
 class GPUTaskAdmin(admin.ModelAdmin):
-    list_display = ('id', 'name', 'workspace', 'cmd', 'gpu_requirement', 'idle_delay_minutes', 'exclusive_gpu', 'memory_requirement', 'utilization_requirement', 'assign_server', 'priority', 'color_status', 'create_at', 'update_at',)
+    list_display = ('id', 'name', 'failure_summary_display', 'workspace', 'cmd', 'gpu_requirement', 'idle_delay_minutes', 'exclusive_gpu', 'memory_requirement', 'utilization_requirement', 'assign_server', 'priority', 'color_status', 'create_at', 'update_at',)
     list_filter = ('gpu_requirement', 'idle_delay_minutes', 'status', 'assign_server', 'priority')
     search_fields = ('name', 'status',)
     list_display_links = ('name',)
@@ -109,6 +114,16 @@ class GPUTaskAdmin(admin.ModelAdmin):
     color_status.short_description = '状态'
     color_status.admin_order_field = 'status'
 
+    def failure_summary_display(self, obj):
+        if obj.status != -1:
+            return '-'
+        running_log = obj.task_logs.filter(status=-1).order_by('-id').first()
+        if running_log is None:
+            return '-'
+        return running_log.get_failure_diagnostics().get('failure_summary') or '-'
+
+    failure_summary_display.short_description = '失败信息'
+
     def delete_queryset(self, request, queryset):
         for task in queryset:
             for running_task in task.task_logs.all():
@@ -149,14 +164,44 @@ class GPUTaskAdmin(admin.ModelAdmin):
 
 @admin.register(GPUTaskRunningLog)
 class GPUTaskRunningLogAdmin(admin.ModelAdmin):
-    list_display = ('id', 'index', 'task', 'server', 'gpus', 'stop_requested', 'log_file_path', 'color_status', 'start_at', 'update_at',)
+    list_display = (
+        'id',
+        'index',
+        'task',
+        'server',
+        'gpus',
+        'failure_summary_display',
+        'remote_exit_code_display',
+        'stop_requested',
+        'log_file_path',
+        'color_status',
+        'start_at',
+        'update_at',
+    )
     list_filter = ('task', 'server', 'status')
     search_fields = ('task', 'server',)
     list_display_links = ('task',)
-    readonly_fields = ('start_at', 'update_at', 'log', 'task', 'index', 'server', 'gpus', 'status', 'log_file_path', 'pid', 'stop_requested')
+    readonly_fields = (
+        'start_at',
+        'update_at',
+        'log',
+        'task',
+        'index',
+        'server',
+        'gpus',
+        'status',
+        'log_file_path',
+        'pid',
+        'stop_requested',
+        'failure_summary_display',
+        'failure_hint_display',
+        'remote_exit_code_display',
+        'last_output_display',
+    )
     fieldsets = (
         ('基本信息', {'fields': ['task', 'index', 'server', 'gpus', 'pid']}),
         ('状态信息', {'fields': ['status', 'stop_requested', 'start_at', 'update_at']}),
+        ('失败信息', {'fields': ['failure_summary_display', 'failure_hint_display', 'remote_exit_code_display', 'last_output_display']}),
         ('日志', {'fields': ['log_file_path', 'log']})
     )
     actions = ('kill_button',)
@@ -192,6 +237,30 @@ class GPUTaskRunningLogAdmin(admin.ModelAdmin):
 
     color_status.short_description = '状态'
     color_status.admin_order_field = 'status'
+
+    def failure_summary_display(self, obj):
+        return obj.get_failure_diagnostics().get('failure_summary') or '-'
+
+    failure_summary_display.short_description = '失败摘要'
+    failure_summary_display.admin_order_field = 'failure_summary'
+
+    def failure_hint_display(self, obj):
+        return obj.get_failure_diagnostics().get('failure_hint') or '-'
+
+    failure_hint_display.short_description = '失败提示'
+    failure_hint_display.admin_order_field = 'failure_hint'
+
+    def remote_exit_code_display(self, obj):
+        return obj.get_failure_diagnostics().get('remote_exit_code') or '-'
+
+    remote_exit_code_display.short_description = '远端退出码'
+    remote_exit_code_display.admin_order_field = 'remote_exit_code'
+
+    def last_output_display(self, obj):
+        return obj.get_failure_diagnostics().get('last_output') or '-'
+
+    last_output_display.short_description = '最后输出'
+    last_output_display.admin_order_field = 'last_output'
 
     def log(self, obj):
         try:

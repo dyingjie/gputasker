@@ -83,6 +83,26 @@ def _format_log_tail(log_lines):
     return '...(tail truncated)...\n' + tail_text[-TASK_LOG_TAIL_CHARS:]
 
 
+def _blank_failure_diagnostics():
+    return {
+        'failure_summary': '',
+        'failure_hint': '',
+        'remote_exit_code': '',
+        'last_output': '',
+    }
+
+
+def _extract_exception_summary(error_text, default_summary):
+    lines = [line.strip() for line in (error_text or '').splitlines() if line.strip()]
+    if not lines:
+        return default_summary
+    for line in reversed(lines):
+        if line == 'Traceback (most recent call last):':
+            continue
+        return _shorten_text(line, 240)
+    return default_summary
+
+
 def _build_failure_diagnostics(return_code, log_file_path, summary_override=None):
     log_lines = _read_log_tail(log_file_path)
     failure_hint = _detect_failure_hint(log_lines)
@@ -103,7 +123,7 @@ def _build_failure_diagnostics(return_code, log_file_path, summary_override=None
         summary = '远端任务命令以非零状态退出'
 
     return {
-        'summary': summary,
+        'failure_summary': summary,
         'remote_exit_code': _format_return_code(return_code),
         'failure_hint': failure_hint,
         'last_output': last_output,
@@ -111,9 +131,20 @@ def _build_failure_diagnostics(return_code, log_file_path, summary_override=None
     }
 
 
+def _build_exception_diagnostics(error_text, default_summary):
+    diagnostics = _blank_failure_diagnostics()
+    summary = _extract_exception_summary(error_text, default_summary)
+    if summary and summary != default_summary:
+        diagnostics['failure_summary'] = _shorten_text('{}: {}'.format(default_summary, summary), 240)
+    else:
+        diagnostics['failure_summary'] = default_summary
+    diagnostics['last_output'] = summary
+    return diagnostics
+
+
 def _append_failure_diagnostics(log_file_path, diagnostics):
     note_lines = [
-        '[GPUTASKER] failure_diagnosis={}'.format(diagnostics['summary']),
+        '[GPUTASKER] failure_diagnosis={}'.format(diagnostics['failure_summary']),
         '[GPUTASKER] remote_exit_code={}'.format(diagnostics['remote_exit_code']),
     ]
     if diagnostics['failure_hint']:
@@ -121,6 +152,19 @@ def _append_failure_diagnostics(log_file_path, diagnostics):
     if diagnostics['last_output']:
         note_lines.append('[GPUTASKER] last_output={}'.format(diagnostics['last_output']))
     _append_log_note(log_file_path, '\n'.join(note_lines))
+
+
+def _persist_failure_diagnostics(running_log, diagnostics):
+    running_log.update_failure_diagnostics(diagnostics)
+    running_log.save(
+        update_fields=[
+            'failure_summary',
+            'failure_hint',
+            'remote_exit_code',
+            'last_output',
+            'update_at',
+        ]
+    )
 
 
 def _state_file_path(log_file_path):
@@ -376,20 +420,27 @@ def _safe_send_notification(send_func, running_log, description):
         )
 
 
-def _finalize_running_log(running_log, return_code, summary_override=None):
+def _finalize_running_log(running_log, return_code, summary_override=None, diagnostics_override=None):
     task = running_log.task
     server = running_log.server
     gpus = _parse_gpu_list(running_log.gpus)
     final_status = 2 if return_code == 0 else -1
 
     if return_code != 0:
-        diagnostics = _build_failure_diagnostics(return_code, running_log.log_file_path, summary_override)
+        diagnostics = diagnostics_override or _build_failure_diagnostics(
+            return_code,
+            running_log.log_file_path,
+            summary_override
+        )
+        if not diagnostics['remote_exit_code']:
+            diagnostics['remote_exit_code'] = _format_return_code(return_code)
+        _persist_failure_diagnostics(running_log, diagnostics)
         _append_failure_diagnostics(running_log.log_file_path, diagnostics)
         task_logger.error(
             'Task %d-%s failure diagnosis: %s | remote_exit_code=%s%s\nTask log tail:\n%s',
             task.id,
             task.name,
-            diagnostics['summary'],
+            diagnostics['failure_summary'],
             diagnostics['remote_exit_code'],
             ' | last_output={}'.format(diagnostics['last_output']) if diagnostics['last_output'] else '',
             diagnostics['tail']
@@ -486,6 +537,9 @@ def run_task(task, available_server, connection_manager):
         error_text = traceback.format_exc()
         task_logger.error(error_text)
         _append_log_note(log_file_path, error_text)
+        diagnostics = _build_exception_diagnostics(error_text, '任务启动失败')
+        _persist_failure_diagnostics(running_log, diagnostics)
+        _append_failure_diagnostics(log_file_path, diagnostics)
         running_log.status = -1
         running_log.stop_requested = False
         running_log.save(update_fields=['status', 'stop_requested', 'update_at'])
@@ -575,4 +629,10 @@ def monitor_running_tasks(connection_manager):
             error_text = traceback.format_exc()
             _append_log_note(running_log.log_file_path, error_text)
             task_logger.error(error_text)
-            _finalize_running_log(running_log, 1, summary_override='任务监控异常退出')
+            diagnostics = _build_exception_diagnostics(error_text, '任务监控异常退出')
+            _finalize_running_log(
+                running_log,
+                1,
+                summary_override=diagnostics['failure_summary'],
+                diagnostics_override=diagnostics
+            )

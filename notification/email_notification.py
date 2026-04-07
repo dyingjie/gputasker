@@ -52,6 +52,10 @@ TASK_FAIL_NOTIFICATION_TEMPLATE = \
 显卡：{}
 结束时间：{}
 
+失败摘要：{}
+远端退出码：{}
+最后输出：{}
+
 请登录GPUTasker查看错误信息
 '''
 
@@ -128,6 +132,7 @@ def send_task_fail_email(running_log):
     address = running_log.task.user.email
     title = TASK_FAIL_NOTIFICATION_TITLE
     server_display_name = get_server_display_name(running_log.server)
+    diagnostics = running_log.get_failure_diagnostics()
     content = TASK_FAIL_NOTIFICATION_TEMPLATE.format(
         running_log.task.name,
         running_log.task.name,
@@ -135,6 +140,9 @@ def send_task_fail_email(running_log):
         running_log.task.cmd,
         server_display_name,
         running_log.gpus,
-        running_log.update_at.strftime("%Y-%m-%d %H:%M:%S")
+        running_log.update_at.strftime("%Y-%m-%d %H:%M:%S"),
+        diagnostics.get('failure_summary') or '运行失败',
+        diagnostics.get('remote_exit_code') or '-',
+        diagnostics.get('last_output') or '-'
     )
     send_email(address, title, content)
