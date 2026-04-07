@@ -1,5 +1,4 @@
 import os
-import signal
 import logging
 
 from django.db import models
@@ -101,6 +100,7 @@ class GPUTaskRunningLog(models.Model):
     pid = models.IntegerField('PID')
     gpus = models.CharField('GPU', max_length=20)
     log_file_path = models.FilePathField(path='running_log', match='.*\.log$', verbose_name="日志文件")
+    stop_requested = models.BooleanField('已请求停止', default=False)
     status = models.SmallIntegerField('状态', choices=STATUS_CHOICE, default=1)
     start_at = models.DateTimeField('开始时间', auto_now_add=True)
     update_at = models.DateTimeField('更新时间', auto_now=True)
@@ -118,7 +118,7 @@ class GPUTaskRunningLog(models.Model):
         if actor:
             reason_text = '{} by {}'.format(reason, actor)
         task_logger.warning(
-            'Terminating running task log %d (task %d-%s), pid=%s, server=%s, gpus=%s, reason=%s',
+            'Requested remote stop for running task log %d (task %d-%s), remote_pid=%s, server=%s, gpus=%s, reason=%s',
             self.id,
             self.task_id,
             self.task.name,
@@ -127,13 +127,17 @@ class GPUTaskRunningLog(models.Model):
             self.gpus,
             reason_text
         )
+        self.stop_requested = True
+        self.save(update_fields=['stop_requested', 'update_at'])
         try:
             with open(self.log_file_path, 'a', encoding='utf-8', errors='ignore') as handle:
                 handle.write('\n[GPUTASKER] local_termination_reason={}\n'.format(reason_text))
         except Exception:
             pass
-        os.kill(self.pid, signal.SIGKILL)
     
     def delete_log_file(self):
         if os.path.isfile(self.log_file_path):
             os.remove(self.log_file_path)
+        state_path = self.log_file_path + '.state.json'
+        if os.path.isfile(state_path):
+            os.remove(state_path)

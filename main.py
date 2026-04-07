@@ -1,7 +1,6 @@
 import os
 from datetime import datetime
 import time
-import threading
 import logging
 import sys
 
@@ -11,13 +10,15 @@ os.environ.setdefault("DJANGO_SETTINGS_MODULE", "gpu_tasker.settings")
 django.setup()
 
 from base.utils import get_admin_config
+from base.persistent_ssh import SSHConnectionManager
 from gpu_tasker.settings import SERVER_LOG_DIR
-from task.models import GPUTask
-from task.utils import run_task
+from task.models import GPUTask, GPUTaskRunningLog
+from task.utils import monitor_running_tasks, run_task
 from gpu_info.utils import GPUInfoUpdater
 
 task_logger = logging.getLogger('django.task')
 POLL_INTERVAL_SECONDS = 30
+MONITOR_INTERVAL_SECONDS = 5
 SCHEDULER_LOCK_PATH = os.path.join(SERVER_LOG_DIR, 'main_scheduler.lock')
 
 
@@ -93,32 +94,41 @@ if __name__ == '__main__':
         sys.exit(0)
 
     task_logger.info('Scheduler lock acquired, pid: {:d}'.format(os.getpid()))
+    connection_manager = SSHConnectionManager()
+    last_poll_started_at = 0
 
     try:
         while True:
             start_time = time.time()
             try:
                 server_username, server_private_key_path = get_admin_config()
-                gpu_updater = GPUInfoUpdater(server_username, server_private_key_path)
+                gpu_updater = GPUInfoUpdater(
+                    server_username,
+                    server_private_key_path,
+                    connection_manager=connection_manager
+                )
 
-                task_logger.info('Running processes: {:d}'.format(
-                    threading.active_count() - 1
+                task_logger.info('Running tasks: {:d}'.format(
+                    GPUTaskRunningLog.objects.filter(status=1).count()
                 ))
 
-                gpu_updater.update_gpu_info()
-                for task in GPUTask.objects.filter(status=0):
-                    available_server = task.find_available_server()
-                    if available_server is not None:
-                        t = threading.Thread(target=run_task, args=(task, available_server))
-                        t.start()
-                        time.sleep(5)
+                monitor_running_tasks(connection_manager)
+
+                if start_time - last_poll_started_at >= POLL_INTERVAL_SECONDS:
+                    gpu_updater.update_gpu_info()
+                    for task in GPUTask.objects.filter(status=0):
+                        available_server = task.find_available_server()
+                        if available_server is not None:
+                            run_task(task, available_server, connection_manager)
+                            time.sleep(1)
+                    last_poll_started_at = start_time
             except Exception as e:
-                task_logger.error(str(e))
+                task_logger.exception(str(e))
             finally:
                 end_time = time.time()
-                # 确保至少间隔三十秒，减少服务器负担
                 duration = end_time - start_time
-                if duration < POLL_INTERVAL_SECONDS:
-                    time.sleep(POLL_INTERVAL_SECONDS - duration)
+                if duration < MONITOR_INTERVAL_SECONDS:
+                    time.sleep(MONITOR_INTERVAL_SECONDS - duration)
     finally:
+        connection_manager.close_all()
         scheduler_lock.release()

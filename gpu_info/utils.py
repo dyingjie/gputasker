@@ -6,6 +6,10 @@ import logging
 from django.utils import timezone
 
 from .models import GPUServer, GPUInfo
+from base.persistent_ssh import (
+    PersistentSSHCommandError,
+    PersistentSSHConnectionError,
+)
 
 task_logger = logging.getLogger('django.task')
 
@@ -318,14 +322,8 @@ def ssh_execute(host, user, exec_cmd, port=22, private_key_path=None):
         raise
 
 
-def get_server_status(host, user, port=22, private_key_path=None):
-    status_output = ssh_execute(
-        host,
-        user,
-        _build_server_status_command(),
-        port,
-        private_key_path
-    ).decode('utf-8', errors='ignore')
+def _parse_server_status_output(status_output):
+    status_output = status_output.decode('utf-8', errors='ignore')
 
     sections = _split_server_status_sections(status_output)
     hostname = '\n'.join(sections[HOSTNAME_MARKER]).strip()
@@ -335,6 +333,22 @@ def get_server_status(host, user, port=22, private_key_path=None):
         '\n'.join(sections[USERS_MARKER]).strip()
     )
     return hostname, gpu_info_list
+
+
+def get_server_status(host, user, port=22, private_key_path=None):
+    status_output = ssh_execute(
+        host,
+        user,
+        _build_server_status_command(),
+        port,
+        private_key_path
+    )
+    return _parse_server_status_output(status_output)
+
+
+def get_server_status_via_session(session):
+    result = session.execute_script(_build_server_status_command())
+    return _parse_server_status_output(result.stdout)
 
 
 def get_hostname(host, user, port=22, private_key_path=None):
@@ -354,10 +368,17 @@ def get_gpu_status(host, user, port=22, private_key_path=None):
 
 
 class GPUInfoUpdater:
-    def __init__(self, user, private_key_path=None):
+    def __init__(self, user=None, private_key_path=None, connection_manager=None):
         self.user = user
         self.private_key_path = private_key_path
+        self.connection_manager = connection_manager
         self.utilization_history = {}
+
+    def _get_server_status(self, server):
+        if self.connection_manager is None:
+            return get_server_status(server.ip, self.user, server.port, self.private_key_path)
+        session = self.connection_manager.get_session(self.user, server.ip, server.port, self.private_key_path)
+        return get_server_status_via_session(session)
     
     def update_utilization(self, uuid, utilization):
         if self.utilization_history.get(uuid) is None:
@@ -373,14 +394,16 @@ class GPUInfoUpdater:
         server_list = GPUServer.objects.all()
         for server in server_list:
             try:
-                hostname, gpu_info_json = get_server_status(server.ip, self.user, server.port, self.private_key_path)
+                hostname, gpu_info_json = self._get_server_status(server)
                 if (server.hostname is None or server.hostname == '') and hostname:
                     server.hostname = hostname
                     server.save()
                 if not server.valid:
                     server.valid = True
                     server.save()
+                live_gpu_uuids = set()
                 for gpu in gpu_info_json:
+                    live_gpu_uuids.add(gpu['uuid'])
                     is_complete_free = len(gpu['processes']) == 0
                     observed_at = timezone.now()
                     if GPUInfo.objects.filter(uuid=gpu['uuid']).count() == 0:
@@ -400,6 +423,9 @@ class GPUInfoUpdater:
                         gpu_info.save()
                     else:
                         gpu_info = GPUInfo.objects.get(uuid=gpu['uuid'])
+                        gpu_info.index = gpu['index']
+                        gpu_info.name = gpu['name']
+                        gpu_info.server = server
                         gpu_info.utilization = self.update_utilization(gpu['uuid'], gpu['utilization.gpu'])
                         gpu_info.memory_total = gpu['memory.total']
                         gpu_info.memory_used = gpu['memory.used']
@@ -414,7 +440,23 @@ class GPUInfoUpdater:
                         gpu_info.complete_free = is_complete_free
                         gpu_info.processes = '\n'.join(map(lambda x: json.dumps(x), gpu['processes']))
                         gpu_info.save()
-            except (subprocess.CalledProcessError, subprocess.TimeoutExpired, RuntimeError) as exc:
+                stale_gpu_qs = server.gpus.exclude(uuid__in=live_gpu_uuids)
+                stale_gpu_uuids = list(stale_gpu_qs.values_list('uuid', flat=True))
+                if stale_gpu_uuids:
+                    stale_gpu_qs.delete()
+                    task_logger.warning(
+                        'Removed %d stale GPU cache entry(s) for %s to match realtime inventory: %s',
+                        len(stale_gpu_uuids),
+                        server.ip,
+                        ', '.join(stale_gpu_uuids)
+                    )
+            except (
+                subprocess.CalledProcessError,
+                subprocess.TimeoutExpired,
+                RuntimeError,
+                PersistentSSHCommandError,
+                PersistentSSHConnectionError,
+            ) as exc:
                 task_logger.exception('Update %s failed: %s', server.ip, _format_update_exception(exc))
                 server.valid = False
                 server.save()

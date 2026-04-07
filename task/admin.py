@@ -149,14 +149,14 @@ class GPUTaskAdmin(admin.ModelAdmin):
 
 @admin.register(GPUTaskRunningLog)
 class GPUTaskRunningLogAdmin(admin.ModelAdmin):
-    list_display = ('id', 'index', 'task', 'server', 'gpus', 'log_file_path', 'color_status', 'start_at', 'update_at',)
+    list_display = ('id', 'index', 'task', 'server', 'gpus', 'stop_requested', 'log_file_path', 'color_status', 'start_at', 'update_at',)
     list_filter = ('task', 'server', 'status')
     search_fields = ('task', 'server',)
     list_display_links = ('task',)
-    readonly_fields = ('start_at', 'update_at', 'log', 'task', 'index', 'server', 'gpus', 'status', 'log_file_path', 'pid')
+    readonly_fields = ('start_at', 'update_at', 'log', 'task', 'index', 'server', 'gpus', 'status', 'log_file_path', 'pid', 'stop_requested')
     fieldsets = (
         ('基本信息', {'fields': ['task', 'index', 'server', 'gpus', 'pid']}),
-        ('状态信息', {'fields': ['status', 'start_at', 'update_at']}),
+        ('状态信息', {'fields': ['status', 'stop_requested', 'start_at', 'update_at']}),
         ('日志', {'fields': ['log_file_path', 'log']})
     )
     actions = ('kill_button',)

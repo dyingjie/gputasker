@@ -110,6 +110,60 @@ class GPUInfoUpdaterTests(TestCase):
         self.assertIsNone(gpu.busy_since)
         self.assertEqual(gpu.free_since, free_since)
 
+    @patch('gpu_info.utils.get_server_status')
+    @patch('gpu_info.utils.timezone.now')
+    def test_update_gpu_info_removes_stale_gpu_entries_and_refreshes_metadata(self, mock_now, mock_get_server_status):
+        observed_at = self.base_time
+        mock_now.return_value = observed_at
+        mock_get_server_status.return_value = (
+            'node-a',
+            [{
+                'uuid': 'GPU-1',
+                'index': 0,
+                'name': 'RTX 4090',
+                'utilization.gpu': 35,
+                'memory.total': 24576,
+                'memory.used': 2048,
+                'processes': [],
+            }]
+        )
+        GPUInfo.objects.create(
+            uuid='GPU-1',
+            index=1,
+            name='Old Name',
+            utilization=50,
+            memory_total=24576,
+            memory_used=4096,
+            processes='',
+            server=self.server,
+            complete_free=False,
+            busy_since=self.base_time - timedelta(minutes=5),
+            free_since=None,
+        )
+        GPUInfo.objects.create(
+            uuid='GPU-stale',
+            index=2,
+            name='Ghost GPU',
+            utilization=0,
+            memory_total=24576,
+            memory_used=0,
+            processes='',
+            server=self.server,
+            complete_free=True,
+            busy_since=None,
+            free_since=self.base_time - timedelta(minutes=15),
+        )
+
+        self.updater.update_gpu_info()
+
+        self.assertFalse(GPUInfo.objects.filter(uuid='GPU-stale').exists())
+        gpu = GPUInfo.objects.get(uuid='GPU-1')
+        self.assertEqual(gpu.index, 0)
+        self.assertEqual(gpu.name, 'RTX 4090')
+        self.assertEqual(gpu.server, self.server)
+        self.assertTrue(gpu.complete_free)
+        self.assertEqual(gpu.free_since, observed_at)
+
 
 class GPUInfoAdminTests(TestCase):
     def setUp(self):
